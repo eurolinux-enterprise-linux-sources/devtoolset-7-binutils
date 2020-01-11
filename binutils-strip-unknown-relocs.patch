@@ -1,0 +1,106 @@
+diff -rup binutils-2.28.orig/bfd/elf32-i386.c binutils-2.28/bfd/elf32-i386.c
+--- binutils-2.28.orig/bfd/elf32-i386.c	2018-02-27 16:58:00.319510958 +0000
++++ binutils-2.28/bfd/elf32-i386.c	2018-02-27 17:07:59.061934402 +0000
+@@ -386,7 +386,7 @@ elf_i386_rtype_to_howto (bfd *abfd, unsi
+       /* xgettext:c-format */
+       _bfd_error_handler (_("%B: invalid relocation type %d"),
+ 			  abfd, (int) r_type);
+-      indx = R_386_NONE;
++      return NULL;
+     }
+   /* PR 17512: file: 0f67f69d.  */
+   if (elf_howto_table [indx].type != r_type)
+diff -rup binutils-2.28.orig/bfd/elf64-ppc.c binutils-2.28/bfd/elf64-ppc.c
+--- binutils-2.28.orig/bfd/elf64-ppc.c	2018-02-27 16:58:00.307511111 +0000
++++ binutils-2.28/bfd/elf64-ppc.c	2018-02-27 17:09:15.307974743 +0000
+@@ -2514,9 +2514,11 @@ ppc64_elf_info_to_howto (bfd *abfd ATTRI
+       /* xgettext:c-format */
+       _bfd_error_handler (_("%B: invalid relocation type %d"),
+ 			  abfd, (int) type);
+-      type = R_PPC64_NONE;
++
++      cache_ptr->howto = NULL;
+     }
+-  cache_ptr->howto = ppc64_elf_howto_table[type];
++  else
++    cache_ptr->howto = ppc64_elf_howto_table[type];
+ }
+ 
+ /* Handle the R_PPC64_ADDR16_HA and similar relocs.  */
+diff -rup binutils-2.28.orig/bfd/elf64-s390.c binutils-2.28/bfd/elf64-s390.c
+--- binutils-2.28.orig/bfd/elf64-s390.c	2018-02-27 16:58:00.309511085 +0000
++++ binutils-2.28/bfd/elf64-s390.c	2018-02-27 17:09:46.776578668 +0000
+@@ -371,9 +371,10 @@ elf_s390_info_to_howto (bfd *abfd ATTRIB
+ 	  /* xgettext:c-format */
+ 	  _bfd_error_handler (_("%B: invalid relocation type %d"),
+ 			      abfd, (int) r_type);
+-	  r_type = R_390_NONE;
++	  cache_ptr->howto = NULL;
+ 	}
+-      cache_ptr->howto = &elf_howto_table[r_type];
++      else
++	cache_ptr->howto = &elf_howto_table[r_type];
+     }
+ }
+ 
+diff -rup binutils-2.28.orig/bfd/elf64-x86-64.c binutils-2.28/bfd/elf64-x86-64.c
+--- binutils-2.28.orig/bfd/elf64-x86-64.c	2018-02-27 16:58:00.305511136 +0000
++++ binutils-2.28/bfd/elf64-x86-64.c	2018-02-27 17:07:32.052274354 +0000
+@@ -288,7 +288,7 @@ elf_x86_64_rtype_to_howto (bfd *abfd, un
+ 	  /* xgettext:c-format */
+ 	  _bfd_error_handler (_("%B: invalid relocation type %d"),
+ 			      abfd, (int) r_type);
+-	  r_type = R_X86_64_NONE;
++	  return NULL;
+ 	}
+       i = r_type;
+     }
+@@ -348,7 +348,6 @@ elf_x86_64_info_to_howto (bfd *abfd ATTR
+ 
+   r_type = ELF32_R_TYPE (dst->r_info);
+   cache_ptr->howto = elf_x86_64_rtype_to_howto (abfd, r_type);
+-  BFD_ASSERT (r_type == cache_ptr->howto->type);
+ }
+ 
+ /* Support for core dump NOTE sections.  */
+diff -rup binutils-2.28.orig/bfd/elfcode.h binutils-2.28/bfd/elfcode.h
+--- binutils-2.28.orig/bfd/elfcode.h	2018-02-27 16:58:00.309511085 +0000
++++ binutils-2.28/bfd/elfcode.h	2018-02-27 17:11:03.616611534 +0000
+@@ -1465,6 +1465,11 @@ elf_slurp_reloc_table_from_section (bfd
+ 	(*ebd->elf_info_to_howto) (abfd, relent, &rela);
+       else
+ 	(*ebd->elf_info_to_howto_rel) (abfd, relent, &rela);
++      if (relent->howto == NULL)
++	{
++	  bfd_set_error (bfd_error_bad_value);
++	  goto error_return;
++	}
+     }
+ 
+   if (allocated != NULL)
+diff -rup binutils-2.28.orig/binutils/objcopy.c binutils-2.28/binutils/objcopy.c
+--- binutils-2.28.orig/binutils/objcopy.c	2018-02-27 16:58:00.322510920 +0000
++++ binutils-2.28/binutils/objcopy.c	2018-02-27 17:02:54.240788492 +0000
+@@ -2720,10 +2720,19 @@ copy_object (bfd *ibfd, bfd *obfd, const
+ 	 haven't been set yet.  mark_symbols_used_in_relocations will
+ 	 ignore input sections which have no corresponding output
+ 	 section.  */
++      bfd_set_error (bfd_error_no_error);
+       if (strip_symbols != STRIP_ALL)
+-	bfd_map_over_sections (ibfd,
+-			       mark_symbols_used_in_relocations,
+-			       isympp);
++	{
++	  bfd_map_over_sections (ibfd,
++				 mark_symbols_used_in_relocations,
++				 isympp);
++	  if (bfd_get_error () != bfd_error_no_error)
++	    {
++	      status = 1;
++	      return FALSE;
++	    }
++	}	  
++
+       osympp = (asymbol **) xmalloc ((symcount + add_symbols + 1) * sizeof (asymbol *));
+       symcount = filter_symbols (ibfd, obfd, osympp, isympp, symcount);
+     }
